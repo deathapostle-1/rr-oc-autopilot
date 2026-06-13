@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         RR OC Autopilot
-// @version      0.1.0
+// @version      0.2.0
 // @author       TXM [1712536]
 // @description  Ruthless Reborn OC Autopilot
 // @match        https://www.torn.com/factions.php*
@@ -9,8 +9,8 @@
 // @connect      api.torn.com
 // @connect      tornprobability.com
 // @license      MIT
-// @updateURL    https://raw.githubusercontent.com/deathapostle-1/RR-OC-Autopilot/main/RR-OC-Autopilot.user.js
-// @downloadURL  https://raw.githubusercontent.com/deathapostle-1/RR-OC-Autopilot/main/RR-OC-Autopilot.user.js
+// @updateURL    https://raw.githubusercontent.com/deathapostle-1/rr-oc-autopilot/main/RR-OC-Autopilot.user.js
+// @downloadURL  https://raw.githubusercontent.com/deathapostle-1/rr-oc-autopilot/main/RR-OC-Autopilot.user.js
 // ==/UserScript==
 
 (function () {
