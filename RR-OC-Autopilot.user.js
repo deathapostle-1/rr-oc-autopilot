@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         RR OC Autopilot
-// @version      0.2.3
+// @version      0.3.0
 // @author       TXM [1712536]
 // @description  Ruthless Reborn OC Autopilot
 // @match        https://www.torn.com/factions.php*
@@ -293,18 +293,17 @@
   /* role name forced white — readable on the dark role box in both themes */
   #faction-crimes-root [class*="slotHeader___"] [class*="title___"]{color:#fff !important}
 
-  /* success chance as a colour-coded status pill (matches the availability chips) */
-  .rr-success{display:inline-flex;align-items:center;gap:6px;margin:3px 0 5px;padding:2px 10px;
-    border-radius:10px;font-size:12px;font-weight:700;background:${FACTION_COLOURS.dark};
-    border:1px solid #444;color:#fff !important}
   .rr-success small{font-weight:400;opacity:.7}
   .rr-unknown{margin:4px 0;padding:4px 8px;border-radius:4px;font-size:12px;
     background:rgba(240,140,0,.18);border:1px solid rgba(240,140,0,.6);color:#ffb84d}
 
-  .rr-avail{display:flex;flex-wrap:wrap;gap:5px;margin:3px 0 5px}
-  .rr-chip{position:relative;display:inline-flex;align-items:center;gap:5px;padding:2px 9px;
-    border-radius:10px;font-size:11px;font-weight:600;background:${FACTION_COLOURS.dark};
-    border:1px solid #444;color:#ddd;cursor:default;line-height:1.5}
+  /* success chance + member status: one level row of matching pills, each
+     bordered and glowing in its own status colour (set inline via --rr-c) */
+  .rr-info{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:4px 0 6px}
+  .rr-chip,.rr-success{position:relative;display:inline-flex;align-items:center;gap:6px;
+    padding:2px 10px;border-radius:10px;font-size:12px;font-weight:700;line-height:1.5;
+    color:#fff !important;background:${FACTION_COLOURS.dark};border:1px solid var(--rr-c,#444);
+    box-shadow:0 0 7px -1px var(--rr-c,transparent);cursor:default}
   .rr-pip{width:8px;height:8px;border-radius:50%;flex:none;
     box-shadow:0 0 0 1px rgba(255,255,255,.28)}
   .rr-chip .rr-tip{display:none;position:absolute;bottom:calc(100% + 7px);left:0;z-index:99999;
@@ -387,7 +386,7 @@
       const panel = document.querySelector(`div[data-oc-id="${ocId}"]`);
       const titleEl = panel && q(panel, sel("panelTitle"));
       if (!titleEl) continue;
-      for (const kind of ["success", "ready", "unknown", "avail"]) {
+      for (const kind of ["unknown", "info"]) {
         const node = rec[kind];
         if (node && !panel.contains(node)) titleEl.after(node);
       }
@@ -407,68 +406,90 @@
     else slot.wrap.appendChild(el("div", "rr-weight", html));
   }
 
-  function renderSuccess(info, tab) {
+  // success chance + member status rendered as one level row of matching pills
+  function renderInfoRow(info, tab) {
     const { panel, ocId, title, slots } = info;
-    let line = panel.querySelector(".rr-success") || panelNodes.get(ocId)?.success;
+    const titleEl = q(panel, sel("panelTitle"));
+    let row = panel.querySelector(".rr-info") || panelNodes.get(ocId)?.info;
     const drop = () => {
-      line?.remove();
+      row?.remove();
+      cacheNode(ocId, "info", null);
       cacheNode(ocId, "success", null);
     };
-    // Recruiting slots aren't filled yet, so a success % is meaningless there
-    if (tab === "Recruiting") return drop();
-    const titleEl = q(panel, sel("panelTitle"));
-    if (!titleEl || !slots.length || !slots.every((s) => s.chance != null)) return drop();
-    Success.ensureRoles();
-    const scenario = Success.scenarioName(title);
-    const order = scenario && Success.order(scenario);
-    if (!order) return drop();
-    const params = Array(order.length).fill(null);
-    for (const s of slots) {
-      const i = order.indexOf(s.roleNorm);
-      if (i >= 0) params[i] = s.chance;
-    }
-    if (params.some((p) => p == null)) return drop();
-    if (!line) line = el("p", "rr-success");
-    if (!panel.contains(line)) titleEl.after(line);
-    cacheNode(ocId, "success", line);
-    // write only if this is still the live success node (it may be briefly
-    // detached mid React-drop — the guard re-attaches it with the value)
-    const show = (v) => {
-      if (panelNodes.get(ocId)?.success !== line) return;
-      const c = v >= 0.75 ? FACTION_COLOURS.accent : v >= 0.5 ? "#db7b2b" : "#cc3232";
-      line.innerHTML = `<span class="rr-pip" style="background:${c}"></span>Success: ${(v * 100).toFixed(2)}%`;
-      panel.dataset.rrSuccess = (v * 100).toFixed(2); // for the success sort
-      if (Toolbar.state.sort.startsWith("success")) safe("sort", applyVisibility);
-    };
-    const key = scenario + "|" + params.join(",");
-    if (Success.cache.has(key)) return show(Success.cache.get(key));
-    // keep any value already on the line; only show the placeholder on a fresh line
-    if (!/%/.test(line.textContent)) line.innerHTML = `Success: <small>calculating…</small>`;
-    Success.get(scenario, params, show);
-  }
 
-  // at-a-glance OC health: how many filled members meet their role threshold
-  function renderReadiness(info, tab) {
-    const { panel, ocId, key, slots } = info;
-    let chip = panel.querySelector(".rr-ready") || panelNodes.get(ocId)?.ready;
-    const drop = () => {
-      chip?.remove();
-      cacheNode(ocId, "ready", null);
-    };
-    const filled = tab === "Planning" ? slots.filter((s) => s.xid && s.chance != null) : [];
-    if (!filled.length) return drop();
-    const shel = isShel();
-    const ready = filled.filter((s) => shel || s.chance >= requiredFor(key, s.roleNorm)).length;
-    const total = filled.length;
-    const colour = ready === total ? FACTION_COLOURS.accent : ready >= total / 2 ? "#db7b2b" : "#cc3232";
-    const html = `<span class="rr-pip" style="background:${colour}"></span>Ready ${ready}/${total}`;
-    if (!chip) chip = el("span", "rr-chip rr-ready");
-    if (chip.dataset.sig !== html) {
-      chip.dataset.sig = html;
-      chip.innerHTML = html;
+    // success pill (Planning + Completed, once every slot has a chance)
+    let pill = null,
+      queue = null;
+    if (tab !== "Recruiting" && titleEl && slots.length && slots.every((s) => s.chance != null)) {
+      Success.ensureRoles();
+      const scenario = Success.scenarioName(title);
+      const order = scenario && Success.order(scenario);
+      if (order) {
+        const params = Array(order.length).fill(null);
+        for (const s of slots) {
+          const i = order.indexOf(s.roleNorm);
+          if (i >= 0) params[i] = s.chance;
+        }
+        if (!params.some((p) => p == null)) {
+          pill = panelNodes.get(ocId)?.success || el("span", "rr-success");
+          cacheNode(ocId, "success", pill);
+          const line = pill;
+          // write only if this is still the live success node (it may be briefly
+          // detached mid React-drop — the guard re-attaches the row with its value)
+          const show = (v) => {
+            if (panelNodes.get(ocId)?.success !== line) return;
+            const c = v >= 0.75 ? FACTION_COLOURS.accent : v >= 0.5 ? "#db7b2b" : "#cc3232";
+            line.style.setProperty("--rr-c", c);
+            line.innerHTML = `<span class="rr-pip" style="background:${c}"></span>Success: ${(v * 100).toFixed(2)}%`;
+            panel.dataset.rrSuccess = (v * 100).toFixed(2); // for the success sort
+            if (Toolbar.state.sort.startsWith("success")) safe("sort", applyVisibility);
+          };
+          const key = scenario + "|" + params.join(",");
+          if (Success.cache.has(key)) show(Success.cache.get(key));
+          else {
+            // keep any value already on the pill; placeholder only on a fresh one
+            if (!/%/.test(line.textContent)) line.innerHTML = `Success: <small>calculating…</small>`;
+            queue = () => Success.get(scenario, params, show);
+          }
+        }
+      }
     }
-    if (!panel.contains(chip)) (panel.querySelector(".rr-success") || q(panel, sel("panelTitle")))?.after(chip);
-    cacheNode(ocId, "ready", chip);
+    if (!pill) cacheNode(ocId, "success", null);
+
+    // member status pills from the Torn API (any tab except Completed)
+    const statuses = [];
+    if (tab !== "Completed" && TornApi.members) {
+      for (const s of slots) {
+        if (!s.xid) continue;
+        const st = TornApi.statusFor(s.xid);
+        const meta = st && UNAVAILABLE[st.state];
+        if (meta) statuses.push({ st, meta });
+      }
+    }
+
+    if (!pill && !statuses.length) return drop();
+    if (!row) row = el("div", "rr-info");
+    if (pill) {
+      if (row.firstChild !== pill) row.prepend(pill); // success always leads
+    } else row.querySelector(".rr-success")?.remove();
+    // status pills, rebuilt only when the set changes
+    const sig = statuses.map(({ st }) => `${st.name}:${st.state}:${st.until || ""}`).join("|");
+    if (row.dataset.sig !== sig) {
+      row.dataset.sig = sig;
+      row.querySelectorAll(".rr-chip").forEach((c) => c.remove());
+      for (const { st, meta } of statuses) {
+        const chip = el(
+          "span",
+          "rr-chip",
+          `<span class="rr-pip" style="background:${meta.colour}"></span>${esc(st.name)}: ${esc(meta.verb)}<span class="rr-tip">${esc(st.name)} is ${esc(meta.verb)}${esc(humanUntil(st.until))}${st.description ? ` · ${esc(st.description)}` : ""}</span>`
+        );
+        chip.style.setProperty("--rr-c", meta.colour);
+        row.appendChild(chip);
+      }
+    }
+    if (!panel.contains(row)) titleEl?.after(row);
+    cacheNode(ocId, "info", row);
+    if (queue) queue();
   }
 
   function renderUnknownBanner(info) {
@@ -487,38 +508,6 @@
     else if (banner.innerHTML !== msg) banner.innerHTML = msg;
     if (!panel.contains(banner)) q(panel, sel("panelTitle"))?.after(banner);
     cacheNode(ocId, "unknown", banner);
-  }
-
-  function renderAvailability(info, tab) {
-    const { panel, ocId, slots } = info;
-    let avail = panel.querySelector(".rr-avail") || panelNodes.get(ocId)?.avail;
-    const drop = () => {
-      avail?.remove();
-      cacheNode(ocId, "avail", null);
-    };
-    if (tab === "Completed" || !TornApi.members) return drop();
-    const unavailable = [];
-    for (const s of slots) {
-      if (!s.xid) continue;
-      const st = TornApi.statusFor(s.xid);
-      const meta = st && UNAVAILABLE[st.state];
-      if (meta) unavailable.push({ st, meta });
-    }
-    if (!unavailable.length) return drop();
-    // only rebuild the chips when the status set actually changed
-    const sig = unavailable.map(({ st }) => `${st.name}:${st.state}:${st.until || ""}`).join("|");
-    if (!avail) avail = el("div", "rr-avail");
-    if (avail.dataset.sig !== sig) {
-      avail.dataset.sig = sig;
-      avail.innerHTML = unavailable
-        .map(
-          ({ st, meta }) =>
-            `<span class="rr-chip"><span class="rr-pip" style="background:${meta.colour}"></span>${esc(st.name)}<span class="rr-tip">${esc(st.name)} is ${meta.verb}${esc(humanUntil(st.until))}${st.description ? ` · ${esc(st.description)}` : ""}</span></span>`
-        )
-        .join("");
-    }
-    if (!panel.contains(avail)) q(panel, sel("panelTitle"))?.after(avail);
-    cacheNode(ocId, "avail", avail);
   }
 
   const relative = (e) => {
@@ -683,10 +672,8 @@
     for (const s of info.slots) {
       safe("weights", () => renderWeight(s, info.key));
     }
-    safe("success", () => renderSuccess(info, tab));
-    safe("readiness", () => renderReadiness(info, tab));
     safe("banner", () => renderUnknownBanner(info));
-    safe("availability", () => renderAvailability(info, tab));
+    safe("info", () => renderInfoRow(info, tab));
     safe("slot-state", () => renderSlotState(info, tab));
 
     safe("dataset", () => {
