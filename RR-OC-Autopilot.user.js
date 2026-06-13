@@ -285,6 +285,11 @@
     border:1px solid rgba(2,158,122,.45);display:block}
   .rr-weight .rr-l{font-size:10px;letter-spacing:1px;color:${FACTION_COLOURS.accent};opacity:.95}
   .rr-weight .rr-v{font-size:16px;font-weight:700;color:#fff}
+
+  /* reframe Torn's role header to match the weight box stacked below it */
+  .rr-role.rr-role{box-sizing:border-box;width:calc(100% - 10px);margin:5px auto !important;
+    border:1px solid rgba(2,158,122,.45) !important;border-radius:4px !important;
+    background:${FACTION_COLOURS.dark} !important}
   .rr-success{margin:2px 0 4px;font-weight:700;color:${FACTION_COLOURS.accent} !important}
   .rr-success small{font-weight:400;opacity:.7}
   .rr-unknown{margin:4px 0;padding:4px 8px;border-radius:4px;font-size:12px;
@@ -332,17 +337,6 @@
   .rr-api:hover{background:${FACTION_COLOURS.accent};color:#fff}
   .rr-api.rr-on{background:${FACTION_COLOURS.accent};color:#fff}
   .rr-hidden-panel{display:none !important}
-
-  /* "join an OC" nudge — borrows Torn's pulsing green action-glow */
-  .rr-remind{display:flex;align-items:center;gap:10px;margin:8px 0;padding:10px 14px;border-radius:6px;
-    background:linear-gradient(90deg,rgba(2,158,122,.22),rgba(2,158,122,.07));
-    border:1px solid ${FACTION_COLOURS.accent};color:#d7fff4;font-weight:700;font-size:12px;
-    letter-spacing:.4px;animation:rr-remind-pulse 1.9s ease-in-out infinite}
-  .rr-remind .rr-remind-dot{width:9px;height:9px;border-radius:50%;flex:none;
-    background:${FACTION_COLOURS.accent};box-shadow:0 0 8px ${FACTION_COLOURS.accent}}
-  @keyframes rr-remind-pulse{
-    0%,100%{box-shadow:0 0 7px rgba(2,158,122,.4),inset 0 0 12px rgba(2,158,122,.14)}
-    50%{box-shadow:0 0 17px rgba(2,158,122,.8),inset 0 0 18px rgba(2,158,122,.3)}}
   `;
 
   /* ---------- panel parsing ---------- */
@@ -478,6 +472,7 @@
       eligibleCount = 0;
     for (const s of slots) {
       clearSlot(s.wrap);
+      s.header.classList.add("rr-role"); // frame to match the weight box
       if (!onRecruiting && !onPlanning && !onCompleted) continue;
       if (s.chance == null) continue;
       const required = requiredFor(key, s.roleNorm);
@@ -594,38 +589,6 @@
     }
   }
 
-  // Nudge the viewer to join while they're not in any role. We latch once we've
-  // spotted them in a slot, so hopping between tabs never re-nags someone who's
-  // already committed to a crime that just isn't on the current tab.
-  let viewerSeenInOC = false;
-  function renderReminder(tab) {
-    const list = listContainer();
-    const existing = document.querySelector(".rr-remind");
-    const vid = viewerId();
-    if (!list || !vid || (tab !== "Recruiting" && tab !== "Planning")) {
-      existing?.remove();
-      return;
-    }
-    const inOC = qa(document, 'div[data-oc-id] a[href*="profiles.php?XID="]').some(
-      (a) => (a.href.match(/XID=(\d+)/) || [])[1] === vid
-    );
-    if (inOC) viewerSeenInOC = true;
-    if (viewerSeenInOC) {
-      existing?.remove();
-      return;
-    }
-    const msg =
-      tab === "Recruiting"
-        ? "You're not in an Organized Crime — pick a role below to join."
-        : "You're not in an Organized Crime — head to Recruiting to join one.";
-    if (existing) {
-      existing.querySelector(".rr-remind-text").textContent = msg;
-      return;
-    }
-    const r = el("div", "rr-remind", `<span class="rr-remind-dot"></span><span class="rr-remind-text">${esc(msg)}</span>`);
-    (document.querySelector(".rr-toolbar") || list).before(r);
-  }
-
   /* ---------- per-panel pipeline ---------- */
   function processPanel(panel, tab) {
     const info = safe("parse", () => parsePanel(panel));
@@ -660,7 +623,6 @@
     if (force) qa(document, "div[data-oc-id]").forEach((p) => delete p.dataset.rrFp);
     for (const p of qa(document, "div[data-oc-id]")) safe("panel", () => processPanel(p, tab));
     safe("toolbar", () => Toolbar.ensure(tab));
-    safe("reminder", () => renderReminder(tab));
     safe("visibility", applyVisibility);
     safe("torn-api", () => TornApi.refresh());
   }
