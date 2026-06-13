@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         RR OC Autopilot
-// @version      0.2.1
+// @version      0.2.2
 // @author       TXM [1712536]
 // @description  Ruthless Reborn OC Autopilot
 // @match        https://www.torn.com/factions.php*
@@ -285,7 +285,18 @@
     border:1px solid rgba(2,158,122,.45);display:block}
   .rr-weight .rr-l{font-size:10px;letter-spacing:1px;color:${FACTION_COLOURS.accent};opacity:.95}
   .rr-weight .rr-v{font-size:16px;font-weight:700;color:#fff}
-  .rr-success{margin:2px 0 4px;font-weight:700;color:${FACTION_COLOURS.accent} !important}
+
+  /* reframe Torn's role header to match the weight box stacked below it */
+  .rr-role.rr-role{box-sizing:border-box;width:calc(100% - 10px);margin:5px auto !important;
+    border:1px solid rgba(2,158,122,.45) !important;border-radius:4px !important;
+    background:${FACTION_COLOURS.dark} !important}
+  /* role name forced white — readable on the dark role box in both themes */
+  #faction-crimes-root [class*="slotHeader___"] [class*="title___"]{color:#fff !important}
+
+  /* success chance as a colour-coded status pill (matches the availability chips) */
+  .rr-success{display:inline-flex;align-items:center;gap:6px;margin:3px 0 5px;padding:2px 10px;
+    border-radius:10px;font-size:12px;font-weight:700;background:${FACTION_COLOURS.dark};
+    border:1px solid #444;color:#fff !important}
   .rr-success small{font-weight:400;opacity:.7}
   .rr-unknown{margin:4px 0;padding:4px 8px;border-radius:4px;font-size:12px;
     background:rgba(240,140,0,.18);border:1px solid rgba(240,140,0,.6);color:#ffb84d}
@@ -294,7 +305,7 @@
   .rr-chip{position:relative;display:inline-flex;align-items:center;gap:5px;padding:2px 9px;
     border-radius:10px;font-size:11px;font-weight:600;background:${FACTION_COLOURS.dark};
     border:1px solid #444;color:#ddd;cursor:default;line-height:1.5}
-  .rr-chip .rr-pip{width:8px;height:8px;border-radius:50%;flex:none;
+  .rr-pip{width:8px;height:8px;border-radius:50%;flex:none;
     box-shadow:0 0 0 1px rgba(255,255,255,.28)}
   .rr-chip .rr-tip{display:none;position:absolute;bottom:calc(100% + 7px);left:0;z-index:99999;
     background:${FACTION_COLOURS.dark};border:1px solid ${FACTION_COLOURS.accent};color:#eee;font-weight:400;
@@ -335,7 +346,6 @@
 
   /* light mode (Torn drops body.dark-mode): keep the green brand but deepen
      text that goes low-contrast on a light panel */
-  body:not(.dark-mode) .rr-success{color:#017055 !important}
   body:not(.dark-mode) .rr-egg{color:#017055}
   body:not(.dark-mode) .rr-unknown{background:rgba(240,140,0,.14);
     border-color:rgba(190,105,0,.65);color:#8a4b00}
@@ -424,7 +434,9 @@
     // write only if this is still the live success node (it may be briefly
     // detached mid React-drop — the guard re-attaches it with the value)
     const show = (v) => {
-      if (panelNodes.get(ocId)?.success === line) line.textContent = `Success: ${(v * 100).toFixed(2)}%`;
+      if (panelNodes.get(ocId)?.success !== line) return;
+      const c = v >= 0.75 ? FACTION_COLOURS.accent : v >= 0.5 ? "#db7b2b" : "#cc3232";
+      line.innerHTML = `<span class="rr-pip" style="background:${c}"></span>Success: ${(v * 100).toFixed(2)}%`;
     };
     const key = scenario + "|" + params.join(",");
     if (Success.cache.has(key)) return show(Success.cache.get(key));
@@ -508,6 +520,7 @@
       eligibleCount = 0;
     for (const s of slots) {
       clearSlot(s.wrap);
+      s.header.classList.add("rr-role"); // frame to match the weight box
       if (!onRecruiting && !onPlanning && !onCompleted) continue;
       if (s.chance == null) continue;
       const required = requiredFor(key, s.roleNorm);
