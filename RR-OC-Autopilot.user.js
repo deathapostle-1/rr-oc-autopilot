@@ -290,6 +290,9 @@
   .rr-role.rr-role{box-sizing:border-box;width:calc(100% - 10px);margin:5px auto !important;
     border:1px solid rgba(2,158,122,.45) !important;border-radius:4px !important;
     background:${FACTION_COLOURS.dark} !important}
+  /* role name forced white — readable on the dark role box in both themes
+     (Torn's inherited colour turns near-black in light mode) */
+  #faction-crimes-root [class*="slotHeader___"] [class*="title___"]{color:#fff !important}
   .rr-success{margin:2px 0 4px;font-weight:700;color:${FACTION_COLOURS.accent} !important}
   .rr-success small{font-weight:400;opacity:.7}
   .rr-unknown{margin:4px 0;padding:4px 8px;border-radius:4px;font-size:12px;
@@ -337,6 +340,13 @@
   .rr-api:hover{background:${FACTION_COLOURS.accent};color:#fff}
   .rr-api.rr-on{background:${FACTION_COLOURS.accent};color:#fff}
   .rr-hidden-panel{display:none !important}
+
+  /* light mode (Torn drops body.dark-mode): keep the green brand but deepen
+     text that goes low-contrast on a light panel */
+  body:not(.dark-mode) .rr-success{color:#017055 !important}
+  body:not(.dark-mode) .rr-egg{color:#017055}
+  body:not(.dark-mode) .rr-unknown{background:rgba(240,140,0,.14);
+    border-color:rgba(190,105,0,.65);color:#8a4b00}
   `;
 
   /* ---------- panel parsing ---------- */
@@ -357,6 +367,31 @@
     return { panel, ocId: panel.getAttribute("data-oc-id"), title, slug, level, key, slots };
   }
 
+  /* ---------- presence guard ----------
+     Our success / availability / unknown lines sit inside Torn's React panel,
+     which re-renders ~once a second (the live countdown) and drops foreign
+     nodes. We keep the live node and re-attach the same one the instant it's
+     detached — no recompute, no "calculating…" flash — so nothing pulses. */
+  const panelNodes = new Map(); // ocId -> { success, avail, unknown }
+  function cacheNode(ocId, kind, node) {
+    if (!ocId) return;
+    let rec = panelNodes.get(ocId);
+    if (!rec) panelNodes.set(ocId, (rec = {}));
+    if (node) rec[kind] = node;
+    else delete rec[kind];
+  }
+  function guardPresence() {
+    for (const [ocId, rec] of panelNodes) {
+      const panel = document.querySelector(`div[data-oc-id="${ocId}"]`);
+      const titleEl = panel && q(panel, sel("panelTitle"));
+      if (!titleEl) continue;
+      for (const kind of ["success", "unknown", "avail"]) {
+        const node = rec[kind];
+        if (node && !panel.contains(node)) titleEl.after(node);
+      }
+    }
+  }
+
   /* ---------- renderers ---------- */
   function renderWeight(slot, key) {
     const w = weightFor(key, slot.roleNorm);
@@ -371,80 +406,89 @@
   }
 
   function renderSuccess(info, tab) {
-    const { panel, title, slots } = info;
-    let line = panel.querySelector(".rr-success");
+    const { panel, ocId, title, slots } = info;
+    let line = panel.querySelector(".rr-success") || panelNodes.get(ocId)?.success;
+    const drop = () => {
+      line?.remove();
+      cacheNode(ocId, "success", null);
+    };
     // Recruiting slots aren't filled yet, so a success % is meaningless there
-    if (tab === "Recruiting") {
-      line?.remove();
-      return;
-    }
+    if (tab === "Recruiting") return drop();
     const titleEl = q(panel, sel("panelTitle"));
-    if (!titleEl || !slots.length || !slots.every((s) => s.chance != null)) {
-      line?.remove();
-      return;
-    }
+    if (!titleEl || !slots.length || !slots.every((s) => s.chance != null)) return drop();
     Success.ensureRoles();
     const scenario = Success.scenarioName(title);
     const order = scenario && Success.order(scenario);
-    if (!order) {
-      line?.remove();
-      return;
-    }
+    if (!order) return drop();
     const params = Array(order.length).fill(null);
     for (const s of slots) {
       const i = order.indexOf(s.roleNorm);
       if (i >= 0) params[i] = s.chance;
     }
-    if (params.some((p) => p == null)) {
-      line?.remove();
-      return;
-    }
-    if (!line) {
-      line = el("p", "rr-success");
-      titleEl.after(line);
-    }
+    if (params.some((p) => p == null)) return drop();
+    if (!line) line = el("p", "rr-success");
+    if (!panel.contains(line)) titleEl.after(line);
+    cacheNode(ocId, "success", line);
+    // write only if this is still the live success node (it may be briefly
+    // detached mid React-drop — the guard re-attaches it with the value)
     const show = (v) => {
-      if (line.isConnected) line.textContent = `Success: ${(v * 100).toFixed(2)}%`;
+      if (panelNodes.get(ocId)?.success === line) line.textContent = `Success: ${(v * 100).toFixed(2)}%`;
     };
     const key = scenario + "|" + params.join(",");
-    if (Success.cache.has(key)) show(Success.cache.get(key));
-    else {
-      line.innerHTML = `Success: <small>calculating…</small>`;
-      Success.get(scenario, params, show);
-    }
+    if (Success.cache.has(key)) return show(Success.cache.get(key));
+    // keep any value already on the line; only show the placeholder on a fresh line
+    if (!/%/.test(line.textContent)) line.innerHTML = `Success: <small>calculating…</small>`;
+    Success.get(scenario, params, show);
   }
 
   function renderUnknownBanner(info) {
-    const { panel, key } = info;
+    const { panel, ocId, key } = info;
     const known = !!(THRESHOLDS[key] || ROLE_WEIGHTS[key]);
-    const existing = panel.querySelector(".rr-unknown");
+    let banner = panel.querySelector(".rr-unknown") || panelNodes.get(ocId)?.unknown;
     if (known) {
-      existing?.remove();
+      banner?.remove();
+      cacheNode(ocId, "unknown", null);
       return;
     }
-    if (!existing) {
-      const msg = isShel()
-        ? `⚠ New scenario — ${SHEL.note}.`
-        : `⚠ New scenario — RR default requirement ${LEVEL_DEFAULT} applies until the script is updated.`;
-      q(panel, sel("panelTitle"))?.after(el("div", "rr-unknown", msg));
-    }
+    const msg = isShel()
+      ? `⚠ New scenario — ${SHEL.note}.`
+      : `⚠ New scenario — RR default requirement ${LEVEL_DEFAULT} applies until the script is updated.`;
+    if (!banner) banner = el("div", "rr-unknown", msg);
+    else if (banner.innerHTML !== msg) banner.innerHTML = msg;
+    if (!panel.contains(banner)) q(panel, sel("panelTitle"))?.after(banner);
+    cacheNode(ocId, "unknown", banner);
   }
 
   function renderAvailability(info, tab) {
-    const { panel, slots } = info;
-    panel.querySelector(".rr-avail")?.remove();
-    if (tab === "Completed" || !TornApi.members) return;
-    const chips = [];
+    const { panel, ocId, slots } = info;
+    let avail = panel.querySelector(".rr-avail") || panelNodes.get(ocId)?.avail;
+    const drop = () => {
+      avail?.remove();
+      cacheNode(ocId, "avail", null);
+    };
+    if (tab === "Completed" || !TornApi.members) return drop();
+    const unavailable = [];
     for (const s of slots) {
       if (!s.xid) continue;
       const st = TornApi.statusFor(s.xid);
       const meta = st && UNAVAILABLE[st.state];
-      if (!meta) continue;
-      chips.push(
-        `<span class="rr-chip"><span class="rr-pip" style="background:${meta.colour}"></span>${esc(st.name)}<span class="rr-tip">${esc(st.name)} is ${meta.verb}${esc(humanUntil(st.until))}${st.description ? ` · ${esc(st.description)}` : ""}</span></span>`
-      );
+      if (meta) unavailable.push({ st, meta });
     }
-    if (chips.length) q(panel, sel("panelTitle"))?.after(el("div", "rr-avail", chips.join("")));
+    if (!unavailable.length) return drop();
+    // only rebuild the chips when the status set actually changed
+    const sig = unavailable.map(({ st }) => `${st.name}:${st.state}:${st.until || ""}`).join("|");
+    if (!avail) avail = el("div", "rr-avail");
+    if (avail.dataset.sig !== sig) {
+      avail.dataset.sig = sig;
+      avail.innerHTML = unavailable
+        .map(
+          ({ st, meta }) =>
+            `<span class="rr-chip"><span class="rr-pip" style="background:${meta.colour}"></span>${esc(st.name)}<span class="rr-tip">${esc(st.name)} is ${meta.verb}${esc(humanUntil(st.until))}${st.description ? ` · ${esc(st.description)}` : ""}</span></span>`
+        )
+        .join("");
+    }
+    if (!panel.contains(avail)) q(panel, sel("panelTitle"))?.after(avail);
+    cacheNode(ocId, "avail", avail);
   }
 
   const relative = (e) => {
@@ -621,6 +665,8 @@
   function renderAll(force = false) {
     const tab = safe("tab", activeTab, null);
     if (force) qa(document, "div[data-oc-id]").forEach((p) => delete p.dataset.rrFp);
+    const live = new Set(qa(document, "div[data-oc-id]").map((p) => p.getAttribute("data-oc-id")));
+    for (const ocId of panelNodes.keys()) if (!live.has(ocId)) panelNodes.delete(ocId); // drop departed crimes
     for (const p of qa(document, "div[data-oc-id]")) safe("panel", () => processPanel(p, tab));
     safe("toolbar", () => Toolbar.ensure(tab));
     safe("visibility", applyVisibility);
@@ -647,7 +693,11 @@
       chip?.classList.toggle("rr-open");
     });
     const root = document.querySelector("#faction-crimes-root") || document.body;
-    new MutationObserver(scheduleRender).observe(root, { childList: true, subtree: true });
+    // re-attach dropped nodes synchronously (no flicker); recompute is debounced
+    new MutationObserver(() => {
+      safe("guard", guardPresence);
+      scheduleRender();
+    }).observe(root, { childList: true, subtree: true });
     window.addEventListener("hashchange", () => setTimeout(() => safe("render", () => renderAll(true)), 300));
     renderAll();
   });
