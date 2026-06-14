@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         RR OC Autopilot
-// @version      0.3.0
+// @version      0.3.1
 // @author       TXM [1712536]
 // @description  Ruthless Reborn OC Autopilot
 // @match        https://www.torn.com/factions.php*
@@ -168,13 +168,16 @@
     }).then((r) => r.json());
   }
 
-  const UNAVAILABLE = {
+  const STATUS = {
+    Okay: { verb: "Available", colour: "#2f9e44" },
     Hospital: { verb: "Hospitalized", colour: "#e03131" },
     Traveling: { verb: "Traveling", colour: "#74c0fc" },
     Abroad: { verb: "Abroad", colour: "#74c0fc" },
     Jail: { verb: "Jailed", colour: "#a1632a" },
     Federal: { verb: "Fedded", colour: "#0a0a0a" },
   };
+  const statusMeta = (state) => STATUS[state] || { verb: state || "Unknown", colour: "#868e96" };
+  const isAway = (state) => !!state && state !== "Okay"; // away = show time remaining
 
   const TornApi = {
     members: null,
@@ -306,6 +309,9 @@
     box-shadow:0 0 7px -1px var(--rr-c,transparent);cursor:default}
   .rr-pip{width:8px;height:8px;border-radius:50%;flex:none;
     box-shadow:0 0 0 1px rgba(255,255,255,.28)}
+  /* per-slot member status: same pill as the success chip, centred under the member */
+  .rr-slot-status{display:flex;justify-content:center;margin:3px 5px 0;max-width:100%}
+  .rr-slot-status .rr-chip{max-width:calc(100% - 2px)}
   .rr-chip .rr-tip{display:none;position:absolute;bottom:calc(100% + 7px);left:0;z-index:99999;
     background:${FACTION_COLOURS.dark};border:1px solid ${FACTION_COLOURS.accent};color:#eee;font-weight:400;
     padding:5px 9px;border-radius:5px;white-space:nowrap;box-shadow:0 3px 12px rgba(0,0,0,.6);
@@ -448,45 +454,16 @@
           if (Success.cache.has(key)) show(Success.cache.get(key));
           else {
             // keep any value already on the pill; placeholder only on a fresh one
-            if (!/%/.test(line.textContent)) line.innerHTML = `Success: <small>calculating…</small>`;
+            // (pip kept so the calculating + resolved states are the same height)
+            if (!/%/.test(line.textContent)) line.innerHTML = `<span class="rr-pip" style="background:#868e96"></span>Success: …`;
             queue = () => Success.get(scenario, params, show);
           }
         }
       }
     }
-    if (!pill) cacheNode(ocId, "success", null);
-
-    // member status pills from the Torn API (any tab except Completed)
-    const statuses = [];
-    if (tab !== "Completed" && TornApi.members) {
-      for (const s of slots) {
-        if (!s.xid) continue;
-        const st = TornApi.statusFor(s.xid);
-        const meta = st && UNAVAILABLE[st.state];
-        if (meta) statuses.push({ st, meta });
-      }
-    }
-
-    if (!pill && !statuses.length) return drop();
+    if (!pill) return drop(); // member status now lives on each slot, not here
     if (!row) row = el("div", "rr-info");
-    if (pill) {
-      if (row.firstChild !== pill) row.prepend(pill); // success always leads
-    } else row.querySelector(".rr-success")?.remove();
-    // status pills, rebuilt only when the set changes
-    const sig = statuses.map(({ st }) => `${st.name}:${st.state}:${st.until || ""}`).join("|");
-    if (row.dataset.sig !== sig) {
-      row.dataset.sig = sig;
-      row.querySelectorAll(".rr-chip").forEach((c) => c.remove());
-      for (const { st, meta } of statuses) {
-        const chip = el(
-          "span",
-          "rr-chip",
-          `<span class="rr-pip" style="background:${meta.colour}"></span>${esc(st.name)}: ${esc(meta.verb)}<span class="rr-tip">${esc(st.name)} is ${esc(meta.verb)}${esc(humanUntil(st.until))}${st.description ? ` · ${esc(st.description)}` : ""}</span>`
-        );
-        chip.style.setProperty("--rr-c", meta.colour);
-        row.appendChild(chip);
-      }
-    }
+    if (row.firstChild !== pill) row.prepend(pill);
     if (!panel.contains(row)) titleEl?.after(row);
     cacheNode(ocId, "info", row);
     if (queue) queue();
@@ -517,6 +494,7 @@
   function clearSlot(wrap) {
     wrap.querySelector(".rr-lock")?.remove();
     wrap.querySelector(".rr-egg")?.remove();
+    wrap.querySelector(".rr-slot-status")?.remove();
     wrap.classList.remove(...FILL);
   }
   function fillState(chance, required, shel) {
@@ -537,6 +515,24 @@
       clearSlot(s.wrap);
       s.header.classList.add("rr-role"); // frame to match the weight box
       if (!onRecruiting && !onPlanning && !onCompleted) continue;
+      // member status pill on the slot itself (all filled members; Torn API; not Completed)
+      if (s.xid && !onCompleted && TornApi.members) {
+        const st = TornApi.statusFor(s.xid);
+        if (st) {
+          const m = statusMeta(st.state);
+          const chip = el(
+            "span",
+            "rr-chip",
+            `<span class="rr-pip" style="background:${m.colour}"></span>${esc(m.verb)}<span class="rr-tip">${esc(st.name)} is ${esc(m.verb)}${esc(humanUntil(st.until))}${st.description ? ` · ${esc(st.description)}` : ""}</span>`
+          );
+          chip.style.setProperty("--rr-c", m.colour);
+          const holder = el("div", "rr-slot-status");
+          holder.appendChild(chip);
+          const w = s.wrap.querySelector(".rr-weight");
+          if (w) s.wrap.insertBefore(holder, w);
+          else s.wrap.appendChild(holder);
+        }
+      }
       if (s.chance == null) continue;
       const required = requiredFor(key, s.roleNorm);
 
