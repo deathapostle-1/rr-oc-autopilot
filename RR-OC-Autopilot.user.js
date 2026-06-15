@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         RR OC Autopilot
-// @version      0.4.2
+// @version      0.4.3
 // @author       TXM [1712536]
 // @description  Ruthless Reborn OC Autopilot
 // @match        https://www.torn.com/factions.php*
@@ -441,6 +441,7 @@
     const { panel, ocId, title, slots } = info;
     const titleEl = q(panel, sel("panelTitle"));
     let row = panel.querySelector(".rr-info") || panelNodes.get(ocId)?.info;
+    qa(panel, ".rr-info").forEach((r) => r !== row && r.remove()); // collapse any stray duplicate rows
     const drop = () => {
       row?.remove();
       cacheNode(ocId, "info", null);
@@ -461,7 +462,8 @@
           if (i >= 0) params[i] = s.chance;
         }
         if (!params.some((p) => p == null)) {
-          pill = panelNodes.get(ocId)?.success || el("span", "rr-success");
+          // DOM-first so a pill left behind by cache/DOM churn is reused, not duplicated
+          pill = panel.querySelector(".rr-success") || panelNodes.get(ocId)?.success || el("span", "rr-success");
           cacheNode(ocId, "success", pill);
           const line = pill;
           // write only if this is still the live success node (it may be briefly
@@ -487,6 +489,7 @@
     }
     if (!pill) return drop(); // member status now lives on each slot, not here
     if (!row) row = el("div", "rr-info");
+    qa(panel, ".rr-success").forEach((p) => p !== pill && p.remove()); // exactly one success pill
     if (row.firstChild !== pill) row.prepend(pill);
     if (!panel.contains(row)) titleEl?.after(row);
     cacheNode(ocId, "info", row);
@@ -497,6 +500,7 @@
     const { panel, ocId, key } = info;
     const known = !!(THRESHOLDS[key] || ROLE_WEIGHTS[key]);
     let banner = panel.querySelector(".rr-unknown") || panelNodes.get(ocId)?.unknown;
+    qa(panel, ".rr-unknown").forEach((b) => b !== banner && b.remove()); // collapse duplicates
     if (known) {
       banner?.remove();
       cacheNode(ocId, "unknown", null);
@@ -708,7 +712,10 @@
     const tab = safe("tab", activeTab, null);
     if (force) qa(document, "div[data-oc-id]").forEach((p) => delete p.dataset.rrFp);
     const live = new Set(qa(document, "div[data-oc-id]").map((p) => p.getAttribute("data-oc-id")));
-    for (const ocId of panelNodes.keys()) if (!live.has(ocId)) panelNodes.delete(ocId); // drop departed crimes
+    // drop departed crimes — but keep any whose nodes are still on the page, so a
+    // transient list re-render can't desync the cache from the DOM (→ duplicate pills)
+    for (const [ocId, rec] of panelNodes)
+      if (!live.has(ocId) && !rec.info?.isConnected && !rec.unknown?.isConnected) panelNodes.delete(ocId);
     for (const p of qa(document, "div[data-oc-id]")) safe("panel", () => processPanel(p, tab));
     safe("toolbar", () => Toolbar.ensure(tab));
     safe("visibility", applyVisibility);
