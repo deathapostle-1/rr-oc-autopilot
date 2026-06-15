@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         RR OC Autopilot
-// @version      0.5.0
+// @version      0.6.0
 // @author       TXM [1712536]
 // @description  Ruthless Reborn OC Autopilot
 // @match        https://www.torn.com/factions.php*
@@ -18,16 +18,11 @@
   "use strict";
 
   /* ---------- faction config ---------- */
-  const PDA_KEY = "###PDA-APIKEY###"; // Torn PDA fills this in automatically
   const AMBER_BAND = 4; // nearly eligible
-  // thresholds + weights come live from our ZZCraft backend, per faction.
-  // Authenticated with each user's own public Torn key (never a shared key).
+  // thresholds + weights come live from our ZZCraft backend, per faction,
+  // authenticated with each user's own public Torn key (never a shared key)
   const ZZCRAFT = { factionId: 8062, base: "https://api.torn.zzcraft.net" };
-
   const FACTION_COLOURS = { accent: "#029e7a", dark: "#1f1f1f" };
-
-  const SHEL = { id: "3940892", note: "Tom doesn't care" };
-
   // Torn's art folder names that don't match the crime's display name
   const SLUG_ALIASES = { pier_pressure: "manifestcruelty", boom_or_bust: "cranereaction" };
 
@@ -58,9 +53,6 @@
     return t && roleNorm in t ? t[roleNorm] : null;
   }
 
-  const viewerId = () => (document.cookie.match(/(?:^|;\s*)uid=(\d+)/) || [])[1] || null;
-  const isShel = () => viewerId() === SHEL.id;
-
   function resolveScenarioKey(title, slug) {
     const t = norm(title);
     if (Config.has(t)) return t;
@@ -74,14 +66,8 @@
 
   const weightFor = (key, roleNorm) => Config.weights?.[key]?.[roleNorm] ?? null;
 
-  /* ---------- Torn API key ---------- */
-  // PDA injects a (non-public) key for the Torn API; the public key the user
-  // enters in the toolbar is what ZZCraft needs (PDA keys aren't public-access)
+  /* ---------- Torn API key (the user's own public access key) ---------- */
   function apiKey() {
-    if (PDA_KEY && !PDA_KEY.includes("###")) return PDA_KEY;
-    return publicKey();
-  }
-  function publicKey() {
     try {
       return localStorage.getItem("rr_oc_api_key") || "";
     } catch (e) {
@@ -308,7 +294,7 @@
       if (Date.now() - this.at > this.ttl) this.fetch();
     },
     fetch() {
-      const key = publicKey();
+      const key = apiKey();
       if (!key || this.loading) return;
       this.loading = true;
       requestJson({
@@ -347,8 +333,6 @@
   #faction-crimes-root [class*="slotHeader___"] [class*="title___"]{color:#fff !important}
 
   .rr-success small{font-weight:400;opacity:.7}
-  .rr-unknown{margin:4px 0;padding:4px 8px;border-radius:4px;font-size:12px;
-    background:rgba(240,140,0,.18);border:1px solid rgba(240,140,0,.6);color:#ffb84d}
 
   /* success chance + member status: matching pills, each bordered and glowing
      in its own status colour (set inline via --rr-c) */
@@ -390,8 +374,6 @@
     justify-content:center;cursor:not-allowed;padding:5px}
   .rr-lock span{background:rgba(31,31,31,.94);border:1px solid rgba(150,150,150,.5);color:#cfcfcf;
     font-size:10px;font-weight:600;padding:2px 8px;border-radius:8px;line-height:1.4;text-align:center}
-  .rr-egg{margin:4px auto 2px;width:95%;text-align:center;font-size:11px;font-style:italic;
-    color:${FACTION_COLOURS.accent};opacity:.9}
 
   .rr-toolbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:8px 0;padding:8px 12px;
     background:${FACTION_COLOURS.dark};border:1px solid rgba(2,158,122,.5);border-radius:6px}
@@ -406,11 +388,6 @@
   .rr-api.rr-on{background:${FACTION_COLOURS.accent};color:#fff}
   .rr-hidden-panel{display:none !important}
 
-  /* light mode (Torn drops body.dark-mode): keep the green brand but deepen
-     text that goes low-contrast on a light panel */
-  body:not(.dark-mode) .rr-egg{color:#017055}
-  body:not(.dark-mode) .rr-unknown{background:rgba(240,140,0,.14);
-    border-color:rgba(190,105,0,.65);color:#8a4b00}
   `;
 
   /* ---------- panel parsing ---------- */
@@ -436,7 +413,7 @@
      which re-renders ~once a second (the live countdown) and drops foreign
      nodes. We keep the live node and re-attach the same one the instant it's
      detached — no recompute, no "calculating…" flash — so nothing pulses. */
-  const panelNodes = new Map(); // ocId -> { success, avail, unknown }
+  const panelNodes = new Map(); // ocId -> { info, success }
   function cacheNode(ocId, kind, node) {
     if (!ocId) return;
     let rec = panelNodes.get(ocId);
@@ -449,10 +426,8 @@
       const panel = document.querySelector(`div[data-oc-id="${ocId}"]`);
       const titleEl = panel && q(panel, sel("panelTitle"));
       if (!titleEl) continue;
-      for (const kind of ["unknown", "info"]) {
-        const node = rec[kind];
-        if (node && !panel.contains(node)) titleEl.after(node);
-      }
+      const node = rec.info;
+      if (node && !panel.contains(node)) titleEl.after(node);
     }
   }
 
@@ -535,42 +510,23 @@
     if (queue) queue();
   }
 
-  function renderUnknownBanner(info) {
-    const { panel, ocId, key } = info;
-    let banner = panel.querySelector(".rr-unknown") || panelNodes.get(ocId)?.unknown;
-    qa(panel, ".rr-unknown").forEach((b) => b !== banner && b.remove()); // collapse duplicates
-    // only flag once config has loaded but this scenario isn't in it (show nothing otherwise)
-    if (!Config.loaded || Config.has(key)) {
-      banner?.remove();
-      cacheNode(ocId, "unknown", null);
-      return;
-    }
-    const msg = isShel() ? `⚠ ${SHEL.note}.` : `⚠ Not configured in ZZCraft yet.`;
-    if (!banner) banner = el("div", "rr-unknown", msg);
-    else if (banner.innerHTML !== msg) banner.innerHTML = msg;
-    if (!panel.contains(banner)) q(panel, sel("panelTitle"))?.after(banner);
-    cacheNode(ocId, "unknown", banner);
-  }
-
   const relative = (e) => {
     if (getComputedStyle(e).position === "static") e.style.position = "relative";
   };
   const FILL = ["rr-fill-green", "rr-fill-amber", "rr-fill-red", "rr-fill-grey"];
   function clearSlot(wrap) {
     wrap.querySelector(".rr-lock")?.remove();
-    wrap.querySelector(".rr-egg")?.remove();
     wrap.classList.remove(...FILL);
     // NB: .rr-slot-status is reused in place (see renderSlotState), not cleared here
   }
-  function fillState(chance, required, shel) {
-    if (shel || chance >= required) return "green";
+  function fillState(chance, required) {
+    if (chance >= required) return "green";
     if (chance >= required - AMBER_BAND) return "amber";
     return "red";
   }
 
   function renderSlotState(info, tab) {
     const { panel, key, slots } = info;
-    const shel = isShel();
     const onRecruiting = tab === "Recruiting";
     const onPlanning = tab === "Planning";
     const onCompleted = tab === "Completed";
@@ -606,22 +562,23 @@
         existingStatus.remove(); // status definitively shouldn't show here (transient null xid keeps it)
       }
       if (s.chance == null) continue;
-      const required = requiredFor(key, s.roleNorm);
-      if (required == null) continue; // no configured threshold → no eligibility colour
+      const required = requiredFor(key, s.roleNorm); // null = not configured in ZZCraft → grey
 
       if (onRecruiting && !s.xid) {
         openCount++;
-        if (shel || s.chance >= required) {
+        if (required == null) {
+          s.wrap.classList.add("rr-fill-grey"); // unknown requirement — don't block, don't hide
+          eligibleCount++;
+        } else if (s.chance >= required) {
           eligibleCount++;
           s.wrap.classList.add("rr-fill-green");
-          if (shel) s.wrap.appendChild(el("div", "rr-egg", esc(SHEL.note)));
         } else {
           relative(s.wrap);
           s.wrap.classList.add("rr-fill-grey");
           s.wrap.appendChild(el("div", "rr-lock", `<span>Not Eligible: Requires: ${required}+</span>`));
         }
       } else {
-        s.wrap.classList.add("rr-fill-" + fillState(s.chance, required, shel));
+        s.wrap.classList.add(required == null ? "rr-fill-grey" : "rr-fill-" + fillState(s.chance, required));
       }
     }
     panel.dataset.rrAutoHide = onRecruiting && openCount > 0 && eligibleCount === 0 ? "1" : "0";
@@ -746,7 +703,6 @@
     for (const s of info.slots) {
       safe("weights", () => renderWeight(s, info.key));
     }
-    safe("banner", () => renderUnknownBanner(info));
     safe("info", () => renderInfoRow(info, tab));
     safe("slot-state", () => renderSlotState(info, tab));
 
@@ -765,7 +721,7 @@
     // drop departed crimes — but keep any whose nodes are still on the page, so a
     // transient list re-render can't desync the cache from the DOM (→ duplicate pills)
     for (const [ocId, rec] of panelNodes)
-      if (!live.has(ocId) && !rec.info?.isConnected && !rec.unknown?.isConnected) panelNodes.delete(ocId);
+      if (!live.has(ocId) && !rec.info?.isConnected) panelNodes.delete(ocId);
     for (const p of qa(document, "div[data-oc-id]")) safe("panel", () => processPanel(p, tab));
     safe("toolbar", () => Toolbar.ensure(tab));
     safe("visibility", applyVisibility);
