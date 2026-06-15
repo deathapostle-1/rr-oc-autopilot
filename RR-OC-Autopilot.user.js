@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         RR OC Autopilot
-// @version      0.6.0
+// @version      0.7.0
 // @author       TXM [1712536]
 // @description  Ruthless Reborn OC Autopilot
 // @match        https://www.torn.com/factions.php*
@@ -260,8 +260,6 @@
     weights: null, //    { scenarioKey: { roleKey: weight } }
     loaded: false,
     loading: false,
-    at: 0,
-    ttl: 12 * 60 * 60 * 1000,
     has(key) {
       return !!(this.thresholds && (this.thresholds[key] || this.weights[key]));
     },
@@ -283,15 +281,13 @@
       this.loaded = true;
     },
     load() {
-      // build from cache for an instant first paint, then refresh if stale
+      // build from cache for an instant first paint, then ALWAYS refresh from the
+      // backend so config edits show up on the next page load (no stale TTL window)
       try {
         const c = JSON.parse(localStorage.getItem("rr_oc_config") || "null");
-        if (c && Array.isArray(c.data)) {
-          this.build(c.data);
-          this.at = c.at || 0;
-        }
+        if (c && Array.isArray(c.data)) this.build(c.data);
       } catch (e) {}
-      if (Date.now() - this.at > this.ttl) this.fetch();
+      this.fetch();
     },
     fetch() {
       const key = apiKey();
@@ -304,9 +300,8 @@
         .then((data) => {
           if (!Array.isArray(data)) throw new Error("bad config");
           this.build(data);
-          this.at = Date.now();
           try {
-            localStorage.setItem("rr_oc_config", JSON.stringify({ data, at: this.at }));
+            localStorage.setItem("rr_oc_config", JSON.stringify({ data }));
           } catch (e) {}
           this.loading = false;
           renderAll(true);
@@ -363,7 +358,10 @@
   .rr-fill-green{box-shadow:inset 0 0 0 200px rgba(2,158,122,.42),0 0 0 2px #029e7a,0 0 9px rgba(2,158,122,.5) !important}
   .rr-fill-amber{box-shadow:inset 0 0 0 200px rgba(219,123,43,.5),0 0 0 2px #db7b2b,0 0 8px rgba(219,123,43,.45) !important}
   .rr-fill-red{box-shadow:inset 0 0 0 200px rgba(204,50,50,.5),0 0 0 2px #cc3232,0 0 8px rgba(204,50,50,.45) !important}
-  .rr-fill-grey{box-shadow:inset 0 0 0 200px rgba(38,38,38,.72),0 0 0 2px rgba(150,150,150,.55) !important}
+  /* unconfigured role → solid grey card (clearly "no data", not just a tint) */
+  .rr-fill-grey{box-shadow:inset 0 0 0 200px rgba(66,66,66,.96),0 0 0 2px rgba(150,150,150,.6) !important}
+  /* drop Torn's member-slot border so the card interior reads cleanly */
+  #faction-crimes-root [class*="slotBody___"]{border-color:transparent !important}
   /* TornTools paints whole OC cards green (.tt-oc-highlight), which our green
      "eligible" fill blends into — give those slots a white ring/glow so they
      stay distinct. Keeps the green interior so it still reads as eligible. */
@@ -434,14 +432,11 @@
   /* ---------- renderers ---------- */
   function renderWeight(slot, key) {
     const w = weightFor(key, slot.roleNorm);
+    const html = `<div class="rr-l">WEIGHT</div><div class="rr-v">${w == null ? "--.--%" : Number(w).toFixed(1) + "%"}</div>`;
     const old = slot.wrap.querySelector(".rr-weight");
-    if (w == null) {
-      old?.remove();
-      return;
-    }
-    const html = `<div class="rr-l">WEIGHT</div><div class="rr-v">${Number(w).toFixed(1)}%</div>`;
-    if (old) old.innerHTML = html;
-    else slot.wrap.appendChild(el("div", "rr-weight", html));
+    if (old) {
+      if (old.innerHTML !== html) old.innerHTML = html;
+    } else slot.wrap.appendChild(el("div", "rr-weight", html));
   }
 
   // success chance + member status rendered as one level row of matching pills
@@ -653,8 +648,7 @@
           syncApiBtn();
           TornApi.fetchedAt = 0;
           TornApi.members = null;
-          Config.at = 0; // re-pull thresholds/weights with the new key
-          Config.fetch();
+          Config.fetch(); // re-pull thresholds/weights with the new key
           renderAll(true);
         });
       });
