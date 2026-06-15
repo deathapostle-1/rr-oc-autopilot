@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         RR OC Autopilot
-// @version      0.4.4
+// @version      0.4.5
 // @author       TXM [1712536]
 // @description  Ruthless Reborn OC Autopilot
 // @match        https://www.torn.com/factions.php*
@@ -540,8 +540,8 @@
   function clearSlot(wrap) {
     wrap.querySelector(".rr-lock")?.remove();
     wrap.querySelector(".rr-egg")?.remove();
-    wrap.querySelector(".rr-slot-status")?.remove();
     wrap.classList.remove(...FILL);
+    // NB: .rr-slot-status is reused in place (see renderSlotState), not cleared here
   }
   function fillState(chance, required, shel) {
     if (shel || chance >= required) return "green";
@@ -561,23 +561,30 @@
       clearSlot(s.wrap);
       s.header.classList.add("rr-role"); // frame to match the weight box
       if (!onRecruiting && !onPlanning && !onCompleted) continue;
-      // member status pill on the slot itself (all filled members; Torn API; not Completed)
-      if (s.xid && !onCompleted && TornApi.members) {
-        const st = TornApi.statusFor(s.xid);
-        if (st) {
-          const m = statusMeta(st.state);
-          const chip = el(
-            "span",
-            "rr-chip",
-            `<span class="rr-pip" style="background:${m.colour}"></span>${esc(m.verb)}<span class="rr-tip">${esc(st.name)}: ${esc(statusDetail(st))}</span>`
+      // member status pill — reuse in place (like the weight box) so re-renders and
+      // transient parses (a momentarily-missing profile link → null xid) don't flicker it
+      const st = !onCompleted && s.xid && TornApi.members ? TornApi.statusFor(s.xid) : null;
+      const existingStatus = s.wrap.querySelector(".rr-slot-status");
+      if (st) {
+        const m = statusMeta(st.state);
+        const sig = `${s.xid}|${st.state}|${st.until}|${st.name}`; // rebuild only when status changes
+        if (!existingStatus || existingStatus.dataset.sig !== sig) {
+          const holder = el(
+            "div",
+            "rr-slot-status",
+            `<span class="rr-chip" style="--rr-c:${m.colour}"><span class="rr-pip" style="background:${m.colour}"></span>${esc(m.verb)}<span class="rr-tip">${esc(st.name)}: ${esc(statusDetail(st))}</span></span>`
           );
-          chip.style.setProperty("--rr-c", m.colour);
-          const holder = el("div", "rr-slot-status");
-          holder.appendChild(chip);
-          const w = s.wrap.querySelector(".rr-weight");
-          if (w) s.wrap.insertBefore(holder, w);
-          else s.wrap.appendChild(holder);
+          holder.dataset.sig = sig;
+          if (existingStatus) existingStatus.replaceWith(holder);
+          else {
+            const w = s.wrap.querySelector(".rr-weight");
+            if (w) s.wrap.insertBefore(holder, w);
+            else s.wrap.appendChild(holder);
+          }
         }
+        // unchanged → leave the existing pill (no flicker)
+      } else if (existingStatus && (onCompleted || !TornApi.members)) {
+        existingStatus.remove(); // status definitively shouldn't show here (transient null xid keeps it)
       }
       if (s.chance == null) continue;
       const required = requiredFor(key, s.roleNorm);
