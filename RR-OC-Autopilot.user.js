@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         RR OC Autopilot
-// @version      0.4.3
+// @version      0.4.4
 // @author       TXM [1712536]
 // @description  Ruthless Reborn OC Autopilot
 // @match        https://www.torn.com/factions.php*
@@ -245,6 +245,7 @@
     cache: new Map(),
     queue: [],
     busy: false,
+    busyJob: null,
     ensureRoles() {
       if (this.roles || this.loading) return;
       this.loading = true;
@@ -276,25 +277,36 @@
         cb(this.cache.get(key));
         return;
       }
-      this.queue.push({ scenario, params, key, cb });
+      // dedupe: fold onto an already queued / in-flight request for the same key
+      const pending = this.queue.find((j) => j.key === key) || (this.busyJob?.key === key ? this.busyJob : null);
+      if (pending) {
+        pending.cbs.push(cb);
+        return;
+      }
+      this.queue.push({ scenario, params, key, cbs: [cb], tries: 0 });
       this.pump();
     },
     pump() {
       if (this.busy || !this.queue.length) return;
       this.busy = true;
-      const job = this.queue.shift();
+      const job = (this.busyJob = this.queue.shift());
       requestJson({ method: "POST", url: this.api + "CalculateSuccess", body: { scenario: job.scenario, parameters: job.params } })
         .then((r) => {
-          if (r && typeof r.successChance === "number") {
-            this.cache.set(job.key, r.successChance);
-            job.cb(r.successChance);
-          }
+          if (!r || typeof r.successChance !== "number") throw new Error("bad response");
+          this.cache.set(job.key, r.successChance);
+          job.cbs.forEach((cb) => cb(r.successChance));
         })
-        .catch(() => {})
-        .finally(() => setTimeout(() => {
-          this.busy = false;
-          this.pump();
-        }, 250));
+        .catch(() => {
+          if (++job.tries < 3) this.queue.push(job); // transient failure — retry later
+          else job.cbs.forEach((cb) => cb(null)); // give up → show "n/a"
+        })
+        .finally(() =>
+          setTimeout(() => {
+            this.busy = false;
+            this.busyJob = null;
+            this.pump();
+          }, 250)
+        );
     },
   };
 
@@ -470,6 +482,12 @@
           // detached mid React-drop — the guard re-attaches the row with its value)
           const show = (v) => {
             if (panelNodes.get(ocId)?.success !== line) return;
+            if (v == null) {
+              // request failed after retries — don't leave it stuck on "calculating"
+              line.style.removeProperty("--rr-c");
+              line.innerHTML = `<span class="rr-pip" style="background:#868e96"></span>Success: n/a`;
+              return;
+            }
             const c = v >= 0.75 ? FACTION_COLOURS.accent : v >= 0.5 ? "#db7b2b" : "#cc3232";
             line.style.setProperty("--rr-c", c);
             line.innerHTML = `<span class="rr-pip" style="background:${c}"></span>Success: ${(v * 100).toFixed(2)}%`;
@@ -662,13 +680,16 @@
     const panels = qa(document, "div[data-oc-id]");
     const list = listContainer();
     const st = Toolbar.state;
-    if (list && st.sort !== "default") {
-      list.style.display = "flex";
-      list.style.flexDirection = "column";
+    if (list) {
+      // restore Torn's own layout when not sorting (don't leave the list forced to flex)
+      const sorting = st.sort !== "default";
+      list.style.display = sorting ? "flex" : "";
+      list.style.flexDirection = sorting ? "column" : "";
     }
     const metric = {
-      "success-desc": (p) => -(+p.dataset.rrSuccess || 0),
-      "success-asc": (p) => +p.dataset.rrSuccess || 0,
+      // unresolved success (no value yet) sorts to the bottom in both directions
+      "success-desc": (p) => (p.dataset.rrSuccess ? -p.dataset.rrSuccess : Infinity),
+      "success-asc": (p) => (p.dataset.rrSuccess ? +p.dataset.rrSuccess : Infinity),
       "level-desc": (p) => -(+p.dataset.rrLevel || 0),
       "level-asc": (p) => +p.dataset.rrLevel || 0,
       "open-desc": (p) => -(+p.dataset.rrOpen || 0),
