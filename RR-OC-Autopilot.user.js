@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         RR OC Autopilot
-// @version      0.10.4
+// @version      0.10.5
 // @author       TXM [1712536]
 // @description  Ruthless Reborn OC Autopilot
 // @match        https://www.torn.com/factions.php*
@@ -142,6 +142,7 @@
             this.members[m.id] = {
               state: m.status?.state || "",
               until: m.status?.until || 0,
+              description: m.status?.description || "",
             };
           renderAll(true);
         }
@@ -537,12 +538,19 @@
   }
 
   .rr-octip {
-    margin-top: 5px;
-    padding-top: 5px;
-    border-top: 1px solid rgba(127, 127, 127, .35);
-    font: 700 11px Arial, sans-serif;
-    color: var(--react-dropdown-color);
-    white-space: nowrap
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin-top: 4px;
+    font: 12px Arial, sans-serif;
+    color: var(--oc-requirement-tooltip-content, var(--react-dropdown-color))
+  }
+
+  .rr-octip-dot {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    box-shadow: 0 0 0 1px rgba(127, 127, 127, .45)
   }`;
 
   /* ============================================================================
@@ -770,6 +778,23 @@
     return [...document.querySelectorAll(":hover")].pop() || null;
   }
 
+  function statusLine(st) {
+    const vis = STATUS_VIS[st.state];
+    if (!vis) return null;
+    if (vis.timed && st.until) {
+      const left = st.until - Math.floor(Date.now() / 1000);
+      return left > 0
+        ? {
+            colour: vis.colour,
+            text: `${st.state} — out in ${humanLeft(left)}`,
+          }
+        : null;
+    }
+    if (st.state === "Traveling" || st.state === "Abroad")
+      return { colour: vis.colour, text: st.description || st.state };
+    return null;
+  }
+
   function augmentTooltip(tip) {
     if (tip.dataset.rrOc || !TornApi.members) return;
     const wrap = slotWrapOf(tooltipTrigger(tip));
@@ -778,14 +803,25 @@
       .querySelector('a[href*="profiles.php?XID="]')
       ?.href.match(/XID=(\d+)/)?.[1];
     const st = xid && TornApi.statusFor(xid);
-    const vis = st && STATUS_VIS[st.state];
-    if (!vis || !vis.timed || !st.until) return;
-    const left = st.until - Math.floor(Date.now() / 1000);
-    if (left <= 0) return;
+    const line = st && statusLine(st);
+    if (!line) return;
     tip.dataset.rrOc = "1";
-    tip.appendChild(
-      el("div", "rr-octip", `${st.state} — out in ${humanLeft(left)}`),
-    );
+
+    const rows = qa(tip, sel("section"));
+    const sample = rows[0];
+    const itemRow = rows.find((r) => /\bitem:/i.test(r.textContent));
+    const host = (itemRow || sample)?.parentElement || tip;
+    const row = el("div", sample ? sample.className : "rr-octip");
+    const sampleIcon = sample && q(sample, sel("icon"));
+    const box = el("div", sampleIcon ? sampleIcon.className : "");
+    const dot = el("span", "rr-octip-dot");
+    dot.style.background = line.colour;
+    box.appendChild(dot);
+    const txt = document.createElement("span");
+    txt.textContent = line.text;
+    row.append(box, txt);
+    if (itemRow) host.insertBefore(row, itemRow);
+    else host.appendChild(row);
   }
 
   function renderSlotState(info, tab) {
