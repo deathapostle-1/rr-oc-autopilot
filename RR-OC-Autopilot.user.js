@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         RR OC Autopilot
-// @version      0.10.2
+// @version      0.10.3
 // @author       TXM [1712536]
 // @description  Ruthless Reborn OC Autopilot
 // @match        https://www.torn.com/factions.php*
@@ -534,10 +534,6 @@
   .rr-api.rr-on {
     background:${FACTION_COLOURS.accent};
     color: #fff
-  }
-
-  .rr-hidden-panel {
-    display: none !important
   }`;
 
   /* ============================================================================
@@ -732,12 +728,10 @@
   }
 
   function renderSlotState(info, tab) {
-    const { panel, key, slots } = info;
+    const { key, slots } = info;
     const onRecruiting = tab === "Recruiting";
     const onPlanning = tab === "Planning";
     const onCompleted = tab === "Completed";
-    let openCount = 0,
-      eligibleCount = 0;
     for (const s of slots) {
       clearSlot(s.wrap);
       s.header.classList.add("rr-role");
@@ -747,12 +741,9 @@
       const required = requiredFor(key, s.roleNorm);
 
       if (onRecruiting && !s.xid) {
-        openCount++;
         if (required == null) {
           s.wrap.classList.add("rr-fill-grey");
-          eligibleCount++;
         } else if (s.chance >= required) {
-          eligibleCount++;
           s.wrap.classList.add("rr-fill-green");
         } else {
           relative(s.wrap);
@@ -773,8 +764,6 @@
         );
       }
     }
-    panel.dataset.rrAutoHide =
-      onRecruiting && openCount > 0 && eligibleCount === 0 ? "1" : "0";
   }
 
   /* ============================================================================
@@ -856,7 +845,6 @@
   };
 
   function applyVisibility() {
-    const tab = activeTab();
     const panels = qa(document, "div[data-oc-id]");
     const list = listContainer();
     const st = Toolbar.state;
@@ -879,12 +867,6 @@
         .sort((a, b) => metric(a) - metric(b))
         .forEach((p, i) => (p.style.order = i));
     else panels.forEach((p) => (p.style.order = ""));
-    for (const p of panels) {
-      p.classList.toggle(
-        "rr-hidden-panel",
-        tab === "Recruiting" && p.dataset.rrAutoHide === "1",
-      );
-    }
   }
 
   /* ============================================================================
