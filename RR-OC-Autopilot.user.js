@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         RR OC Autopilot
-// @version      0.10.5
+// @version      0.10.6
 // @author       TXM [1712536]
 // @description  Ruthless Reborn OC Autopilot
 // @match        https://www.torn.com/factions.php*
@@ -615,7 +615,7 @@
     const req = requiredFor(key, slot.roleNorm);
     const html =
       `<div class="rr-cell"><div class="rr-l">Min</div><div class="rr-v">${req == null ? "--" : req}</div></div>` +
-      `<div class="rr-cell"><div class="rr-l">Weight</div><div class="rr-v">${w == null ? "--.--%" : Number(w).toFixed(1) + "%"}</div></div>`;
+      `<div class="rr-cell"><div class="rr-l">Weight</div><div class="rr-v">${w == null ? "--.--%" : Number(w).toFixed(2) + "%"}</div></div>`;
     const old = slot.wrap.querySelector(".rr-meta");
     if (old) {
       if (old.innerHTML !== html) old.innerHTML = html;
