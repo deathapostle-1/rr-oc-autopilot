@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         RR OC Autopilot
-// @version      0.10.7
+// @version      0.10.8
 // @author       TXM [1712536]
 // @description  Ruthless Reborn OC Autopilot
 // @match        https://www.torn.com/factions.php*
@@ -551,6 +551,11 @@
     height: 12px;
     border-radius: 50%;
     box-shadow: 0 0 0 1px rgba(127, 127, 127, .45)
+  }
+
+  .rr-octip-sym {
+    font-size: 12px;
+    line-height: 1
   }`;
 
   /* ============================================================================
@@ -779,6 +784,8 @@
     return [...document.querySelectorAll(":hover")].pop() || null;
   }
 
+  const STATUS_SYMBOL = { Hospital: "🏥", Jail: "🔒", Federal: "🏛️" };
+
   function statusLine(st) {
     const vis = STATUS_VIS[st.state];
     if (!vis) return null;
@@ -787,12 +794,13 @@
       return left > 0
         ? {
             colour: vis.colour,
+            symbol: STATUS_SYMBOL[st.state] || "",
             text: `${st.state} — out in ${humanLeft(left)}`,
           }
         : null;
     }
-    if (st.state === "Abroad")
-      return { colour: vis.colour, text: st.description || st.state };
+    if (st.state === "Abroad" || st.state === "Traveling")
+      return { colour: vis.colour, symbol: "", text: st.description || st.state };
     return null;
   }
 
@@ -804,7 +812,24 @@
       .querySelector('a[href*="profiles.php?XID="]')
       ?.href.match(/XID=(\d+)/)?.[1];
     const st = xid && TornApi.statusFor(xid);
-    const line = st && statusLine(st);
+    if (!st) return;
+
+    // Traveling: fold the destination into Torn's own travel row, if it has one
+    if (st.state === "Traveling" && st.description) {
+      const tRow = qa(tip, sel("section")).find((r) =>
+        /travel|returning/i.test(r.textContent),
+      );
+      if (tRow) {
+        tip.dataset.rrOc = "1";
+        const iconDiv = q(tRow, sel("icon"));
+        const textEl = [...tRow.children].find((c) => c !== iconDiv);
+        if (textEl) textEl.textContent = st.description;
+        else tRow.appendChild(document.createTextNode(" " + st.description));
+        return;
+      }
+    }
+
+    const line = statusLine(st);
     if (!line) return;
     tip.dataset.rrOc = "1";
 
@@ -815,9 +840,12 @@
     const row = el("div", sample ? sample.className : "rr-octip");
     const sampleIcon = sample && q(sample, sel("icon"));
     const box = el("div", sampleIcon ? sampleIcon.className : "");
-    const dot = el("span", "rr-octip-dot");
-    dot.style.background = line.colour;
-    box.appendChild(dot);
+    if (line.symbol) box.appendChild(el("span", "rr-octip-sym", line.symbol));
+    else {
+      const dot = el("span", "rr-octip-dot");
+      dot.style.background = line.colour;
+      box.appendChild(dot);
+    }
     const txt = document.createElement("span");
     txt.textContent = line.text;
     row.append(box, txt);
