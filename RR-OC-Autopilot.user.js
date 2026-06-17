@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         RR OC Autopilot
-// @version      0.10.8
+// @version      0.10.9
 // @author       TXM [1712536]
 // @description  Ruthless Reborn OC Autopilot
 // @match        https://www.torn.com/factions.php*
@@ -786,24 +786,6 @@
 
   const STATUS_SYMBOL = { Hospital: "🏥", Jail: "🔒", Federal: "🏛️" };
 
-  function statusLine(st) {
-    const vis = STATUS_VIS[st.state];
-    if (!vis) return null;
-    if (vis.timed && st.until) {
-      const left = st.until - Math.floor(Date.now() / 1000);
-      return left > 0
-        ? {
-            colour: vis.colour,
-            symbol: STATUS_SYMBOL[st.state] || "",
-            text: `${st.state} — out in ${humanLeft(left)}`,
-          }
-        : null;
-    }
-    if (st.state === "Abroad" || st.state === "Traveling")
-      return { colour: vis.colour, symbol: "", text: st.description || st.state };
-    return null;
-  }
-
   function augmentTooltip(tip) {
     if (tip.dataset.rrOc || !TornApi.members) return;
     const wrap = slotWrapOf(tooltipTrigger(tip));
@@ -812,42 +794,55 @@
       .querySelector('a[href*="profiles.php?XID="]')
       ?.href.match(/XID=(\d+)/)?.[1];
     const st = xid && TornApi.statusFor(xid);
-    if (!st) return;
+    const vis = st && STATUS_VIS[st.state];
+    if (!vis) return;
 
-    // Traveling: fold the destination into Torn's own travel row, if it has one
-    if (st.state === "Traveling" && st.description) {
-      const tRow = qa(tip, sel("section")).find((r) =>
-        /travel|returning/i.test(r.textContent),
-      );
-      if (tRow) {
-        tip.dataset.rrOc = "1";
-        const iconDiv = q(tRow, sel("icon"));
-        const textEl = [...tRow.children].find((c) => c !== iconDiv);
-        if (textEl) textEl.textContent = st.description;
-        else tRow.appendChild(document.createTextNode(" " + st.description));
-        return;
-      }
+    // the extra detail and how to attach it to Torn's native status row (rows[0])
+    let match = null,
+      text = "",
+      replace = false;
+    if (vis.timed && st.until) {
+      const left = st.until - Math.floor(Date.now() / 1000);
+      if (left <= 0) return;
+      match = /hospital|jail/i;
+      text = ` — out in ${humanLeft(left)}`;
+    } else if (st.state === "Traveling" && st.description) {
+      match = /travel|returning/i;
+      text = st.description;
+      replace = true;
+    } else if (st.state === "Abroad") {
+      text = st.description || st.state;
+    } else return;
+
+    tip.dataset.rrOc = "1";
+    const rows = qa(tip, sel("section"));
+
+    // prefer Torn's own status row (top of the tooltip, already carries its icon)
+    const native =
+      match && rows[0] && match.test(rows[0].textContent) ? rows[0] : null;
+    if (native) {
+      const iconDiv = q(native, sel("icon"));
+      const textEl = [...native.children].find((c) => c !== iconDiv) || native;
+      textEl.textContent = replace ? text : textEl.textContent + text;
+      return;
     }
 
-    const line = statusLine(st);
-    if (!line) return;
-    tip.dataset.rrOc = "1";
-
-    const rows = qa(tip, sel("section"));
+    // fallback: our own row, above the item row
     const sample = rows[0];
     const itemRow = rows.find((r) => /\bitem:/i.test(r.textContent));
     const host = (itemRow || sample)?.parentElement || tip;
     const row = el("div", sample ? sample.className : "rr-octip");
     const sampleIcon = sample && q(sample, sel("icon"));
     const box = el("div", sampleIcon ? sampleIcon.className : "");
-    if (line.symbol) box.appendChild(el("span", "rr-octip-sym", line.symbol));
+    const symbol = STATUS_SYMBOL[st.state];
+    if (symbol) box.appendChild(el("span", "rr-octip-sym", symbol));
     else {
       const dot = el("span", "rr-octip-dot");
-      dot.style.background = line.colour;
+      dot.style.background = vis.colour;
       box.appendChild(dot);
     }
     const txt = document.createElement("span");
-    txt.textContent = line.text;
+    txt.textContent = vis.timed ? `${st.state}${text}` : text;
     row.append(box, txt);
     if (itemRow) host.insertBefore(row, itemRow);
     else host.appendChild(row);
