@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         RR OC Autopilot
-// @version      0.10.9
+// @version      0.10.10
 // @author       TXM [1712536]
 // @description  Ruthless Reborn OC Autopilot
 // @match        https://www.torn.com/factions.php*
@@ -335,6 +335,22 @@
     color: #fff
   }
 
+  .rr-cp {
+    box-sizing: border-box;
+    width: calc(100% - 10px);
+    height: 4px;
+    margin: 0 auto 5px;
+    border-radius: 2px;
+    overflow: hidden;
+    background: var(--oc-clock-bg, rgba(255, 255, 255, .12))
+  }
+
+  .rr-cp > i {
+    display: block;
+    height: 100%;
+    background: var(--oc-clock-planning-bg, #5bc0de)
+  }
+
   .rr-role.rr-role {
     box-sizing: border-box;
     width: 100% !important;
@@ -625,6 +641,20 @@
     if (old) {
       if (old.innerHTML !== html) old.innerHTML = html;
     } else slot.wrap.appendChild(el("div", "rr-meta", html));
+  }
+
+  function renderCheckpoint(slot) {
+    let bar = slot.wrap.querySelector(".rr-cp");
+    if (slot.chance == null) {
+      bar?.remove();
+      return;
+    }
+    if (!bar) {
+      bar = el("div", "rr-cp", "<i></i>");
+      slot.wrap.appendChild(bar);
+    }
+    const pct = Math.max(0, Math.min(100, slot.chance)) + "%";
+    if (bar.firstChild.style.width !== pct) bar.firstChild.style.width = pct;
   }
 
   function renderInfoRow(info, tab) {
@@ -1006,6 +1036,7 @@
     panel.dataset.rrFp = fp;
 
     for (const s of info.slots) {
+      safe("checkpoint", () => renderCheckpoint(s));
       safe("meta", () => renderMeta(s, info.key));
     }
     safe("info", () => renderInfoRow(info, tab));
