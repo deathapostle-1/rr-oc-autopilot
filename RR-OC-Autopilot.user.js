@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         RR OC Autopilot
-// @version      0.10.12
+// @version      0.10.13
 // @author       TXM [1712536]
 // @description  Ruthless Reborn OC Autopilot
 // @match        https://www.torn.com/factions.php*
@@ -109,14 +109,21 @@
   }
 
   const STATUS_VIS = {
-    Okay: { colour: "#2f9e44", timed: false },
-    Hospital: { colour: "#e03131", timed: true },
-    Jail: { colour: "#a1632a", timed: true },
-    Federal: { colour: "#0a0a0a", timed: true },
-    Traveling: { colour: "#74c0fc", timed: false },
-    Abroad: { colour: "#74c0fc", timed: false },
+    Okay: { timed: false },
+    Hospital: { timed: true },
+    Jail: { timed: true },
+    Federal: { timed: true },
+    Traveling: { timed: false },
+    Abroad: { timed: false },
   };
-  const STATUS_RING_CAP = 60 * 60;
+  const STATUS_ICON = {
+    Okay: `<svg viewBox="0 0 24 24" fill="none" stroke="#2f9e44" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12.5l5 5 11-12"/></svg>`,
+    Hospital: `<svg viewBox="0 0 24 24" fill="#e03131"><path d="M9 2h6v7h7v6h-7v7H9v-7H2V9h7z"/></svg>`,
+    Jail: `<svg viewBox="0 0 24 24" fill="#c98a52"><rect x="3.5" y="2" width="3" height="20" rx="1"/><rect x="10.5" y="2" width="3" height="20" rx="1"/><rect x="17.5" y="2" width="3" height="20" rx="1"/></svg>`,
+    Traveling: `<svg viewBox="0 0 24 24" fill="#74c0fc"><path d="M22 12c0-.7-.6-1.3-1.3-1.3L14 10l-4-7H8l2 7-4 .3L4 8H2.5l1 4-1 4H4l2-2.3 4 .3-2 7h2l4-7 6.7-.7c.7 0 1.3-.6 1.3-1.3z"/></svg>`,
+  };
+  STATUS_ICON.Federal = STATUS_ICON.Jail;
+  STATUS_ICON.Abroad = STATUS_ICON.Traveling;
 
   const TornApi = {
     members: null,
@@ -406,24 +413,21 @@
     box-shadow: 0 0 0 1px rgba(255, 255, 255, .28)
   }
 
-  .rr-circle {
+  .rr-stat {
     position: absolute;
-    top: 4px;
-    left: 6px;
-    width: 12px;
-    height: 12px;
-    border-radius: 50%;
+    top: 3px;
+    left: 4px;
+    width: 14px;
+    height: 14px;
     z-index: 5;
     pointer-events: none;
-    box-shadow: 0 0 0 1px rgba(255, 255, 255, .28), 0 0 7px -1px var(--rr-c, transparent)
+    display: flex
   }
 
-  .rr-circle.rr-ring::after {
-    content: "";
-    position: absolute;
-    inset: 2px;
-    border-radius: 50%;
-    background:${FACTION_COLOURS.dark}
+  .rr-stat svg {
+    width: 14px;
+    height: 14px;
+    display: block
   }
 
   .rr-fill-green,
@@ -733,33 +737,25 @@
     return "red";
   }
 
-  function renderStatusCircle(s, onCompleted) {
-    let circle = s.wrap.querySelector(".rr-circle");
+  function renderStatusIcon(s, onCompleted) {
+    let icon = s.wrap.querySelector(".rr-stat");
     const st =
       !onCompleted && s.xid && TornApi.members
         ? TornApi.statusFor(s.xid)
         : null;
-    const vis = st && STATUS_VIS[st.state];
-    if (!vis) {
-      circle?.remove();
+    const svg = st && STATUS_ICON[st.state];
+    if (!svg) {
+      icon?.remove();
       return;
     }
-    if (!circle) {
-      circle = el("span", "rr-circle");
+    if (!icon) {
+      icon = el("span", "rr-stat");
       relative(s.wrap);
-      s.wrap.appendChild(circle);
+      s.wrap.appendChild(icon);
     }
-    circle.style.setProperty("--rr-c", vis.colour);
-    if (vis.timed && st.until) {
-      const frac = Math.max(
-        0,
-        Math.min(1, (st.until - Date.now() / 1000) / STATUS_RING_CAP),
-      );
-      circle.className = "rr-circle rr-ring";
-      circle.style.background = `conic-gradient(${vis.colour} ${frac * 360}deg, rgba(255,255,255,.14) 0)`;
-    } else {
-      circle.className = "rr-circle";
-      circle.style.background = vis.colour;
+    if (icon.dataset.st !== st.state) {
+      icon.dataset.st = st.state;
+      icon.innerHTML = svg;
     }
   }
 
@@ -797,24 +793,21 @@
     return [...document.querySelectorAll(":hover")].pop() || null;
   }
 
-  const STATUS_SYMBOL = { Hospital: "🏥", Jail: "🔒", Federal: "🏛️" };
-
   function statusText(st) {
     const vis = st && STATUS_VIS[st.state];
     if (!vis) return null;
+    if (st.state === "Okay") return "Available";
     if (vis.timed && st.until) {
       const left = st.until - Math.floor(Date.now() / 1000);
-      return left > 0
-        ? `${STATUS_SYMBOL[st.state] || ""} ${st.state} — out in ${humanLeft(left)}`.trim()
-        : null;
+      return left > 0 ? `${st.state} — out in ${humanLeft(left)}` : st.state;
     }
     if (st.state === "Traveling" || st.state === "Abroad")
       return st.description || st.state;
     return null;
   }
 
-  function augmentTooltip(tip) {
-    if (tip.dataset.rrOc || !TornApi.members) return;
+  function applyTooltipStatus(tip) {
+    if (!TornApi.members) return;
     const wrap = slotWrapOf(tooltipTrigger(tip));
     if (!wrap) return;
     const xid = wrap
@@ -824,13 +817,24 @@
     if (!text) return;
     const top = qa(tip, sel("section"))[0];
     if (!top) return;
-    tip.dataset.rrOc = "1";
     const iconDiv = q(top, sel("icon"));
     const textEl = [...top.children].find((c) => c !== iconDiv) || top;
-    // member status takes priority over the now-redundant % completion (shown in the bar)
-    textEl.textContent = /%/.test(textEl.textContent)
-      ? text
-      : textEl.textContent + " · " + text;
+    // overwrite Torn's planning text with the member status; idempotent (avoids a re-apply loop)
+    if (textEl.textContent !== text) textEl.textContent = text;
+  }
+
+  // the tooltip is React-managed and re-renders (e.g. live planning %), reverting a one-shot
+  // edit — so re-apply on every change. The observer callback runs before paint => no flicker.
+  function augmentTooltip(tip) {
+    if (tip.__rrObs) return;
+    const apply = () => safe("tooltip", () => applyTooltipStatus(tip));
+    tip.__rrObs = new MutationObserver(apply);
+    apply();
+    tip.__rrObs.observe(tip, {
+      childList: true,
+      subtree: true,
+      characterData: true,
+    });
   }
 
   function renderSlotState(info, tab) {
@@ -842,7 +846,7 @@
       clearSlot(s.wrap);
       s.header.classList.add("rr-role");
       if (!onRecruiting && !onPlanning && !onCompleted) continue;
-      renderStatusCircle(s, onCompleted);
+      renderStatusIcon(s, onCompleted);
       if (s.chance == null) continue;
       const required = requiredFor(key, s.roleNorm);
 
@@ -1035,7 +1039,7 @@
         xid: profile ? profile.href.match(/XID=(\d+)/)?.[1] : null,
       };
       safe("tick-cp", () => renderCheckpoint(s));
-      safe("tick-circle", () => renderStatusCircle(s, onCompleted));
+      safe("tick-icon", () => renderStatusIcon(s, onCompleted));
     }
   }
 
