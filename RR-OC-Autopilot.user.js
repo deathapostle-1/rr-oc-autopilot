@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         RR OC Autopilot
-// @version      0.11.0
+// @version      0.11.1
 // @author       TXM [1712536]
 // @description  Ruthless Reborn OC Autopilot
 // @match        https://www.torn.com/factions.php*
@@ -559,6 +559,12 @@
     letter-spacing: 1px
   }
 
+  .rr-count {
+    font-size: 11px;
+    color: #8a8a8a;
+    white-space: nowrap
+  }
+
   .rr-right {
     margin-left: auto;
     display: flex;
@@ -620,8 +626,40 @@
     display: inline-block
   }
 
+  body:not(.dark-mode) .rr-fill-green,
+  body:not(.dark-mode) .rr-fill-amber,
+  body:not(.dark-mode) .rr-fill-red,
+  body:not(.dark-mode) .rr-fill-grey {
+    background: #e2e4e6 !important
+  }
+
+  body:not(.dark-mode) .rr-role.rr-role {
+    background: #d4d7da !important
+  }
+
+  body:not(.dark-mode) #faction-crimes-root [class*="slotHeader___"] [class*="title___"] {
+    color: #2a2a2a !important
+  }
+
+  body:not(.dark-mode) #faction-crimes-root [class*="slotHeader___"].rr-item-missing [class*="title___"] {
+    color: #cc3232 !important
+  }
+
+  body:not(.dark-mode) .rr-meta .rr-cell {
+    background: #eef0f1
+  }
+
+  body:not(.dark-mode) .rr-meta .rr-v {
+    color: #222
+  }
+
+  body:not(.dark-mode) .rr-success {
+    background: #eef0f1;
+    color: #222 !important
+  }
+
   body:not(.dark-mode) .rr-cp {
-    background: rgba(255, 255, 255, .18)
+    background: rgba(0, 0, 0, .12)
   }
 
   body:not(.dark-mode) .rr-legend i {
@@ -708,7 +746,7 @@
     }
     if (!bar) {
       bar = el("div", "rr-cp", "<i></i>");
-      slot.wrap.appendChild(bar);
+      slot.wrap.insertBefore(bar, slot.wrap.querySelector(".rr-meta"));
     }
     const pctNum = failed
       ? 100
@@ -931,7 +969,7 @@
       s.header.classList.add("rr-role");
       s.header.classList.toggle(
         "rr-item-missing",
-        !!FactionCrimes.missingItem(ocId, s.roleNorm),
+        !!s.xid && !!FactionCrimes.missingItem(ocId, s.roleNorm),
       );
       if (!onRecruiting && !onPlanning && !onCompleted) continue;
       renderStatusIcon(s, onCompleted);
@@ -992,6 +1030,7 @@
       const bar = el("div", "rr-toolbar");
       bar.innerHTML = `
         <span class="rr-brand">RR <small>· OC AUTOPILOT</small></span>
+        <span class="rr-count"></span>
         <span class="rr-legend">
           <span><i style="background:#029e7a"></i>Eligible</span>
           <span><i style="background:#db7b2b"></i>Close</span>
@@ -1001,6 +1040,7 @@
         <span class="rr-right">
           <select class="rr-sort">
             <option value="default">Sort: default</option>
+            <option value="eligibility-desc">Eligibility ↓</option>
             <option value="success-desc">Success ↓</option>
             <option value="success-asc">Success ↑</option>
             <option value="level-desc">Level ↓</option>
@@ -1019,12 +1059,12 @@
       const apiBtn = bar.querySelector(".rr-api");
       const syncApiBtn = () => apiBtn.classList.toggle("rr-on", !!apiKey());
       syncApiBtn();
-      apiBtn.title = "Torn API key for member availability";
+      apiBtn.title = "Torn API key (Limited Access) for member status + items";
       apiBtn.addEventListener("click", () => {
         if (bar.querySelector(".rr-api-input")) return;
         const input = el("input", "rr-api-input");
         input.type = "text";
-        input.placeholder = "Torn API key (public) — blank clears";
+        input.placeholder = "Torn API key (Limited Access) — blank clears";
         input.style.width = "230px";
         const ok = el("button", "rr-api", "SAVE");
         apiBtn.before(input, ok);
@@ -1042,6 +1082,8 @@
           syncApiBtn();
           TornApi.fetchedAt = 0;
           TornApi.members = null;
+          FactionCrimes.fetchedAt = 0;
+          FactionCrimes.byId = null;
           Config.fetch();
           renderAll(true);
         });
@@ -1059,6 +1101,7 @@
       list.style.flexDirection = sorting ? "column" : "";
     }
     const metric = {
+      "eligibility-desc": (p) => -(+p.dataset.rrJoinable || 0),
       "success-desc": (p) =>
         p.dataset.rrSuccess ? -p.dataset.rrSuccess : Infinity,
       "success-asc": (p) =>
@@ -1072,6 +1115,11 @@
         .sort((a, b) => metric(a) - metric(b))
         .forEach((p, i) => (p.style.order = i));
     } else panels.forEach((p) => (p.style.order = ""));
+    const countEl = document.querySelector(".rr-count");
+    if (countEl) {
+      const joinable = panels.filter((p) => +p.dataset.rrJoinable > 0).length;
+      countEl.textContent = `${panels.length} OCs${joinable ? ` · ${joinable} joinable` : ""}`;
+    }
   }
 
   /* ============================================================================
@@ -1100,6 +1148,11 @@
     safe("dataset", () => {
       panel.dataset.rrLevel = info.level || "";
       panel.dataset.rrOpen = info.slots.filter((s) => !s.xid).length;
+      panel.dataset.rrJoinable = info.slots.filter((s) => {
+        if (s.xid || s.chance == null) return false;
+        const req = requiredFor(info.key, s.roleNorm);
+        return req == null || s.chance >= req - AMBER_BAND;
+      }).length;
       panel.dataset.rrTitle = info.title;
     });
   }
