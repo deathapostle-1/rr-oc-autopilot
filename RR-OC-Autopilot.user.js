@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         RR OC Autopilot
-// @version      0.11.1
+// @version      0.11.2
 // @author       TXM [1712536]
 // @description  Ruthless Reborn OC Autopilot
 // @match        https://www.torn.com/factions.php*
@@ -176,7 +176,7 @@
                 roles[norm(s.position)] = { id: req.id, available: req.is_available !== false };
               }
             }
-            map[c.id] = roles;
+            map[c.id] = { roles, status: c.status };
           }
           this.byId = map;
           renderAll(true);
@@ -184,8 +184,11 @@
       } catch (e) {}
     },
     missingItem(ocId, roleNorm) {
-      const r = this.byId?.[ocId]?.[roleNorm];
+      const r = this.byId?.[ocId]?.roles?.[roleNorm];
       return r && !r.available ? r : null;
+    },
+    failed(ocId) {
+      return /fail/i.test(this.byId?.[ocId]?.status || "");
     },
   };
 
@@ -274,7 +277,6 @@
   const Config = {
     thresholds: null,
     weights: null,
-    loaded: false,
     loading: false,
     at: 0,
     ttl: 6 * 60 * 60 * 1000,
@@ -298,7 +300,6 @@
       }
       this.thresholds = th;
       this.weights = wt;
-      this.loaded = true;
     },
     load() {
       try {
@@ -698,7 +699,6 @@
       panel,
       ocId: panel.getAttribute("data-oc-id"),
       title,
-      slug,
       level,
       key,
       slots,
@@ -736,7 +736,11 @@
   }
 
   function renderCheckpoint(slot) {
-    const failed = !!slot.wrap.closest(sel("failed"));
+    const ocId = slot.wrap
+      .closest("div[data-oc-id]")
+      ?.getAttribute("data-oc-id");
+    const failed =
+      FactionCrimes.failed(ocId) || !!slot.wrap.closest(sel("failed"));
     const ring = slot.wrap.querySelector(sel("planning"));
     const deg = ring && (ring.getAttribute("style") || "").match(/([\d.]+)deg/);
     let bar = slot.wrap.querySelector(".rr-cp");
@@ -1153,7 +1157,6 @@
         const req = requiredFor(info.key, s.roleNorm);
         return req == null || s.chance >= req - AMBER_BAND;
       }).length;
-      panel.dataset.rrTitle = info.title;
     });
   }
 
